@@ -122,14 +122,14 @@ def _configure_attention(config: Any, attention: str) -> Any:
     if attention not in {"sdpa", "magi"}:
         raise ValueError(f"Unsupported LocateAnything attention implementation: {attention}")
 
-    # LocateAnything creates its vision and language models from nested configs.
-    # These must be set before construction; changing them afterward does not
+    # LocateAnything creates its language model from the nested text config.
+    # This must be set before construction; changing it afterward does not
     # replace decoder layers that were already created as FlashAttention layers.
+    # Leave the vision config alone so its compatible fast attention path remains
+    # enabled; only the custom Qwen/MTP text path needs SDPA on standard hosts.
     config._attn_implementation = attention
     if hasattr(config, "text_config"):
         config.text_config._attn_implementation = attention
-    if attention == "sdpa" and hasattr(config, "vision_config"):
-        config.vision_config._attn_implementation = attention
     return config
 
 
