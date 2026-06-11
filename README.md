@@ -1,3 +1,5 @@
+
+
 # ComfyUI-LocateAnything
 
 ComfyUI custom nodes for NVIDIA's [LocateAnything-3B](https://huggingface.co/nvidia/LocateAnything-3B) visual grounding model.
@@ -9,6 +11,12 @@ LocateAnything supports object detection, phrase grounding, text localization, d
 This repository contains integration code only. Model weights are downloaded separately from Hugging Face.
 
 The NVIDIA LocateAnything-3B checkpoint is released under the [NVIDIA License](https://huggingface.co/nvidia/LocateAnything-3B/blob/main/LICENSE) for non-commercial use. NVIDIA states that use, reproduction, and modification are permitted for academic and non-profit research purposes only. Review the official model license before downloading or using the checkpoint.
+
+## Notice
+
+This repo is built upon **@alisson-anjos**'s [repo](https://github.com/alisson-anjos/ComfyUI-LocateAnything.git) that builds a ComfyUI node that integrates Nvidia's [LocateAnything](https://research.nvidia.com/labs/lpr/locate-anything/) model (released at CVPR 2026).
+
+This repo adds RunComfy comopatibility.
 
 ## Nodes
 
@@ -93,7 +101,7 @@ Generation modes:
 
 Releases model references and clears the CUDA cache.
 
-## Installation
+## Installation for Local ComfyUI
 
 ### ComfyUI Manager
 
@@ -109,6 +117,31 @@ pip install -r requirements.txt
 ```
 
 Restart ComfyUI after installation.
+
+
+## Installation for RunComfy
+
+1. Open **ComfyUI Manager** in your RunComfy workspace.
+2. Select **Install via Git URL** and enter:
+
+   ```text
+   https://github.com/ylchen333/ComfyUI-LocateAnything.git
+   ```
+
+3. Open the RunComfy terminal and install the model's additional runtime dependencies:
+
+   ```bash
+   pip install decord lmdb
+   ```
+
+4. Restart ComfyUI so the custom nodes and dependencies are loaded.
+
+
+A basic demo can be imported with the following directions:
+1. Download [LocateAnything_basic_demo.json](LocateAnything_basic_demo.json), then drag it onto the ComfyUI canvas or use **Workflow > Open** to import it.
+2. Select an image in the **Load Image** node and run the workflow.
+
+The first run downloads the LocateAnything checkpoint into `ComfyUI/models/LocateAnything` and can take several minutes. Later runs reuse the downloaded model. Keep the model loader set to `attention: sdpa` on standard RunComfy instances.
 
 ## Basic Workflow
 
@@ -128,6 +161,8 @@ task: ground_multi
 query: person
 generation_mode: hybrid
 ```
+
+
 
 ## Performance Notes
 
