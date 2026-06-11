@@ -122,14 +122,14 @@ def _configure_attention(config: Any, attention: str) -> Any:
     if attention not in {"sdpa", "magi"}:
         raise ValueError(f"Unsupported LocateAnything attention implementation: {attention}")
 
-    # PretrainedConfig._attn_implementation's public setter recursively applies
-    # one implementation to every sub-config. LocateAnything needs mixed
-    # attention on standard CUDA hosts: MoonViT keeps FlashAttention 2 while the
-    # custom Qwen/MTP decoder uses SDPA. Set only Qwen's internal resolved value.
+    # A scalar assignment recursively applies one implementation to every
+    # sub-config. Use Transformers' per-subconfig mapping so MoonViT keeps its
+    # compatible FlashAttention 2 path while the custom Qwen/MTP decoder uses
+    # SDPA on standard CUDA hosts.
     if hasattr(config, "text_config"):
-        config.text_config._attn_implementation_internal = attention
+        config._attn_implementation = {"text_config": attention}
     else:
-        config._attn_implementation_internal = attention
+        config._attn_implementation = attention
     return config
 
 
@@ -139,12 +139,17 @@ def _attention_summary(model: Any) -> str:
     text_config = getattr(config, "text_config", None)
     language_model = getattr(model, "language_model", None)
     language_core = getattr(language_model, "model", None)
+    layers = getattr(language_core, "layers", ())
+    text_attention_class = (
+        getattr(layers[0], "self_attn", None).__class__.__name__ if layers else None
+    )
     return ", ".join(
         (
             f"top={getattr(config, '_attn_implementation', None)}",
             f"vision={getattr(vision_config, '_attn_implementation', None)}",
             f"text={getattr(text_config, '_attn_implementation', None)}",
             f"language_model={getattr(language_core, '_attn_implementation', None)}",
+            f"text_attention_class={text_attention_class}",
         )
     )
 
@@ -332,6 +337,7 @@ class LocateAnythingRuntime:
         seed: int,
         verbose: bool,
     ) -> dict[str, Any]:
+        preparation_started = time.perf_counter()
         messages = [
             {
                 "role": "user",
@@ -353,6 +359,7 @@ class LocateAnythingRuntime:
             videos=videos,
             return_tensors="pt",
         ).to(self.device)
+        preparation_elapsed = time.perf_counter() - preparation_started
 
         started = time.perf_counter()
         cuda_devices = list(range(torch.cuda.device_count())) if torch.cuda.is_available() else []
@@ -385,7 +392,12 @@ class LocateAnythingRuntime:
         else:
             answer = str(payload)
 
-        result = {"answer": answer, "elapsed_seconds": elapsed}
+        result = {
+            "answer": answer,
+            "input_preparation_seconds": preparation_elapsed,
+            "generation_seconds": elapsed,
+            "elapsed_seconds": preparation_elapsed + elapsed,
+        }
         if isinstance(response, tuple) and len(response) >= 3:
             result["history"] = response[1]
             result["stats"] = response[2]
@@ -451,6 +463,7 @@ class LocateAnythingModelLoader:
     ):
         from transformers import AutoConfig, AutoModel, AutoProcessor, AutoTokenizer
 
+        load_started = time.perf_counter()
         model_path = _resolve_model_source(model_source, download_model)
         torch_device = _resolve_device(device)
         torch_dtype = _resolve_dtype(dtype, torch_device)
@@ -470,6 +483,7 @@ class LocateAnythingModelLoader:
         processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
         model = AutoModel.from_pretrained(model_path, **kwargs).to(torch_device).eval()
         print(f"[LocateAnything] Effective attention: {_attention_summary(model)}")
+        print(f"[LocateAnything] Model load completed in {time.perf_counter() - load_started:.2f}s")
 
         return (
             LocateAnythingRuntime(
@@ -604,6 +618,8 @@ Coordinates are parsed from the model's normalized [0, 1000] format. A batch of 
                     "prompt": prompt,
                     "answer": result["answer"],
                     "elapsed_seconds": result["elapsed_seconds"],
+                    "input_preparation_seconds": result["input_preparation_seconds"],
+                    "generation_seconds": result["generation_seconds"],
                     "seed": frame_seed,
                     "locations": locations,
                     "stats": result.get("stats"),
