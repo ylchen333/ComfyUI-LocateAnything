@@ -28,7 +28,7 @@ Inputs:
 | `download_model` | Downloads missing model files automatically when enabled. |
 | `device` | `auto`, `cuda`, `cpu`, or `mps`. NVIDIA CUDA is the recommended path. |
 | `dtype` | `auto`, `bfloat16`, `float16`, or `float32`. `auto` selects an appropriate dtype for the device. |
-| `attention` | `sdpa`, `auto`, or `magi`. SDPA is the broadly compatible default and recommended for RunComfy. Use Magi only when MagiAttention is installed. |
+| `attention` | `sdpa`, `auto`, or `magi`. SDPA is the broadly compatible default and recommended for RunComfy. It applies SDPA only to the custom Qwen decoder while preserving MoonViT's faster compatible attention path. Use Magi only when MagiAttention is installed. |
 
 The official checkpoint requires `trust_remote_code=True`. Loading it executes Python modeling files shipped in the Hugging Face model repository.
 
@@ -132,7 +132,8 @@ generation_mode: hybrid
 ## Performance Notes
 
 - The official model card recommends `generation_mode="hybrid"` and up to `max_new_tokens=8192` to avoid truncating dense responses.
-- Without optional [MagiAttention](https://sandai-org.github.io/MagiAttention/docs/main/user_guide/install.html), use the default `sdpa` setting. The checkpoint's automatic fallback may select FlashAttention 2 when it is installed, which is incompatible with LocateAnything's custom MTP attention masks in some environments.
+- Without optional [MagiAttention](https://sandai-org.github.io/MagiAttention/docs/main/user_guide/install.html), use the default `sdpa` setting. The loader keeps FlashAttention 2 enabled for MoonViT but applies SDPA to the custom Qwen/MTP decoder. Applying SDPA recursively to both submodels is substantially slower, while applying FlashAttention 2 to Qwen is incompatible with its custom MTP attention masks in some environments.
+- On load, the node prints the effective top-level, vision, text, and language-model attention implementations. A standard RunComfy CUDA deployment should report `vision=flash_attention_2`, `text=sdpa`, and `language_model=sdpa`.
 - The model card documents optimized NVIDIA GPU execution. CPU execution is exposed for compatibility but will be substantially slower.
 
 ## Official References

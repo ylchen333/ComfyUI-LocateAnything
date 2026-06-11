@@ -122,15 +122,31 @@ def _configure_attention(config: Any, attention: str) -> Any:
     if attention not in {"sdpa", "magi"}:
         raise ValueError(f"Unsupported LocateAnything attention implementation: {attention}")
 
-    # LocateAnything creates its language model from the nested text config.
-    # This must be set before construction; changing it afterward does not
-    # replace decoder layers that were already created as FlashAttention layers.
-    # Leave the vision config alone so its compatible fast attention path remains
-    # enabled; only the custom Qwen/MTP text path needs SDPA on standard hosts.
-    config._attn_implementation = attention
+    # PretrainedConfig._attn_implementation's public setter recursively applies
+    # one implementation to every sub-config. LocateAnything needs mixed
+    # attention on standard CUDA hosts: MoonViT keeps FlashAttention 2 while the
+    # custom Qwen/MTP decoder uses SDPA. Set only Qwen's internal resolved value.
     if hasattr(config, "text_config"):
-        config.text_config._attn_implementation = attention
+        config.text_config._attn_implementation_internal = attention
+    else:
+        config._attn_implementation_internal = attention
     return config
+
+
+def _attention_summary(model: Any) -> str:
+    config = model.config
+    vision_config = getattr(config, "vision_config", None)
+    text_config = getattr(config, "text_config", None)
+    language_model = getattr(model, "language_model", None)
+    language_core = getattr(language_model, "model", None)
+    return ", ".join(
+        (
+            f"top={getattr(config, '_attn_implementation', None)}",
+            f"vision={getattr(vision_config, '_attn_implementation', None)}",
+            f"text={getattr(text_config, '_attn_implementation', None)}",
+            f"language_model={getattr(language_core, '_attn_implementation', None)}",
+        )
+    )
 
 
 def _tensor_to_pil(image: torch.Tensor) -> Image.Image:
@@ -453,6 +469,7 @@ class LocateAnythingModelLoader:
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
         processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
         model = AutoModel.from_pretrained(model_path, **kwargs).to(torch_device).eval()
+        print(f"[LocateAnything] Effective attention: {_attention_summary(model)}")
 
         return (
             LocateAnythingRuntime(
