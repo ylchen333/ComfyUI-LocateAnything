@@ -116,6 +116,23 @@ def _resolve_dtype(dtype: str, device: torch.device) -> torch.dtype:
     return torch.float32
 
 
+def _configure_attention(config: Any, attention: str) -> Any:
+    if attention == "auto":
+        return config
+    if attention not in {"sdpa", "magi"}:
+        raise ValueError(f"Unsupported LocateAnything attention implementation: {attention}")
+
+    # LocateAnything creates its vision and language models from nested configs.
+    # These must be set before construction; changing them afterward does not
+    # replace decoder layers that were already created as FlashAttention layers.
+    config._attn_implementation = attention
+    if hasattr(config, "text_config"):
+        config.text_config._attn_implementation = attention
+    if attention == "sdpa" and hasattr(config, "vision_config"):
+        config.vision_config._attn_implementation = attention
+    return config
+
+
 def _tensor_to_pil(image: torch.Tensor) -> Image.Image:
     array = image.detach().cpu().clamp(0, 1).numpy()
     return Image.fromarray(np.rint(array * 255.0).astype(np.uint8), mode="RGB")
@@ -392,10 +409,10 @@ class LocateAnythingModelLoader:
                     {"default": "auto", "tooltip": "Model precision. auto selects bfloat16 or float16 on CUDA and float32 on CPU."},
                 ),
                 "attention": (
-                    ["sdpa", "auto", "eager"],
+                    ["sdpa", "auto", "magi"],
                     {
                         "default": "sdpa",
-                        "tooltip": "SDPA is the stable choice for GPUs without MagiAttention.",
+                        "tooltip": "SDPA is the stable choice for RunComfy. Use Magi only when MagiAttention is installed.",
                     },
                 ),
             }
@@ -416,17 +433,18 @@ class LocateAnythingModelLoader:
         dtype: str,
         attention: str,
     ):
-        from transformers import AutoModel, AutoProcessor, AutoTokenizer
+        from transformers import AutoConfig, AutoModel, AutoProcessor, AutoTokenizer
 
         model_path = _resolve_model_source(model_source, download_model)
         torch_device = _resolve_device(device)
         torch_dtype = _resolve_dtype(dtype, torch_device)
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+        _configure_attention(config, attention)
         kwargs = {
+            "config": config,
             "trust_remote_code": True,
             "torch_dtype": torch_dtype,
         }
-        if attention != "auto":
-            kwargs["attn_implementation"] = attention
 
         print(
             f"[LocateAnything] Loading {model_path} on {torch_device} "
@@ -435,27 +453,6 @@ class LocateAnythingModelLoader:
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
         processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
         model = AutoModel.from_pretrained(model_path, **kwargs).to(torch_device).eval()
-
-        model = AutoModel.from_pretrained(model_path, **kwargs).to(torch_device).eval()
-
-        # Force nested LocateAnything/Qwen2 modules away from flash_attention_2.
-        for module in model.modules():
-            if hasattr(module, "_attn_implementation"):
-                module._attn_implementation = "sdpa"
-            if hasattr(module, "config") and hasattr(module.config, "_attn_implementation"):
-                module.config._attn_implementation = "sdpa"
-
-        if hasattr(model, "config"):
-            model.config._attn_implementation = "sdpa"
-            if hasattr(model.config, "text_config"):
-                model.config.text_config._attn_implementation = "sdpa"
-
-        if hasattr(model, "language_model"):
-            lm = model.language_model
-            if hasattr(lm, "_attn_implementation"):
-                lm._attn_implementation = "sdpa"
-            if hasattr(lm, "config"):
-                lm.config._attn_implementation = "sdpa"
 
         return (
             LocateAnythingRuntime(

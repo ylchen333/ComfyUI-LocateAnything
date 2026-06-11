@@ -28,7 +28,7 @@ Inputs:
 | `download_model` | Downloads missing model files automatically when enabled. |
 | `device` | `auto`, `cuda`, `cpu`, or `mps`. NVIDIA CUDA is the recommended path. |
 | `dtype` | `auto`, `bfloat16`, `float16`, or `float32`. `auto` selects an appropriate dtype for the device. |
-| `attention` | `sdpa`, `auto`, or `eager`. SDPA is the broadly compatible default. |
+| `attention` | `sdpa`, `auto`, or `magi`. SDPA is the broadly compatible default and recommended for RunComfy. Use Magi only when MagiAttention is installed. |
 
 The official checkpoint requires `trust_remote_code=True`. Loading it executes Python modeling files shipped in the Hugging Face model repository.
 
@@ -132,7 +132,7 @@ generation_mode: hybrid
 ## Performance Notes
 
 - The official model card recommends `generation_mode="hybrid"` and up to `max_new_tokens=8192` to avoid truncating dense responses.
-- Without optional [MagiAttention](https://sandai-org.github.io/MagiAttention/docs/main/user_guide/install.html), the checkpoint falls back to PyTorch SDPA. This remains functional but may be slower for MTP decoding.
+- Without optional [MagiAttention](https://sandai-org.github.io/MagiAttention/docs/main/user_guide/install.html), use the default `sdpa` setting. The checkpoint's automatic fallback may select FlashAttention 2 when it is installed, which is incompatible with LocateAnything's custom MTP attention masks in some environments.
 - The model card documents optimized NVIDIA GPU execution. CPU execution is exposed for compatibility but will be substantially slower.
 
 ## Official References
